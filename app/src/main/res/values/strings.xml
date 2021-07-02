@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">도로파손 수집용 앱</string>
+
+    <!--인트로 화면 텍스트 모음-->
+    <string name="intro_logo">도로파손 수집용 앱</string>
+    <string name="login_version_text">버전 1.0.0</string>
+    <!--로그인 화면 텍스트 모음-->
+    <string name="login_logo">도로파손 수집용 앱</string>
+    <string name="login_id_text">아이디</string>
+    <string name="login_pw_text">비밀번호</string>
+    <string name="login_auto_login">자동 로그인</string>
+    <string name="login_login_text">로그인</string>
+</resources>
