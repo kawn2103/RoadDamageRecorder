@@ -685,7 +685,7 @@ class CameraActivity : AppCompatActivity() {
     }
 
     companion object{
-        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS "
         private const val REQUEST_CAMERA_PERMISSION_RESULT = 0
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1000
     }
