@@ -30,7 +30,7 @@ class RetrofitInstance {
         private fun httpLoggingInterceptor(): HttpLoggingInterceptor? {
             val interceptor = HttpLoggingInterceptor(object : HttpLoggingInterceptor.Logger {
                 override fun log(message: String) {
-                    Log.e("MyGitHubData :", message + "")
+                    Log.i("gwan2103_httpLog", "httpLog ====> $message")
                 }
             })
             return interceptor.setLevel(HttpLoggingInterceptor.Level.BODY)

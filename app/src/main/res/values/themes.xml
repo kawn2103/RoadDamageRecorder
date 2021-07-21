@@ -14,5 +14,25 @@
         <!-- Customize your theme here. -->
     </style>
 
-    <style name="Theme.RoadDamageRecorder.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar"/>
+    <style name="Theme.RoadDamageRecorder.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!--<item name="android:windowFullscreen">true</item>-->
+    </style>
+
+    <!--네비게이션 드로우 테마-->
+    <style name="NavigationTheme" parent="Theme.RoadDamageRecorder.NoActionBar">
+        <item name="listPreferredItemHeightSmall">52dp</item><!-- menu item height- vary as u need -->
+    </style>
+
+    <!--리사이클러뷰 스타일-->
+    <style name="myRecyclerViewStyle">
+        <!-- NOTE: clipChildren should be false on API level 11 or later -->
+        <item name="android:clipChildren">false</item>
+        <item name="android:clipToPadding">false</item>
+        <item name="android:paddingBottom">@dimen/activity_vertical_margin</item>
+        <item name="android:paddingLeft">@dimen/activity_horizontal_margin</item>
+        <item name="android:paddingRight">@dimen/activity_horizontal_margin</item>
+        <item name="android:paddingTop">@dimen/activity_vertical_margin</item>
+        <item name="android:scrollbarStyle">outsideOverlay</item>
+        <item name="android:scrollbars">vertical</item>
+    </style>
 </resources>
