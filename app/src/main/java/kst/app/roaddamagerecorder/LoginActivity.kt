@@ -1,6 +1,7 @@
 package kst.app.roaddamagerecorder
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.inputmethod.EditorInfo
@@ -29,12 +30,18 @@ class LoginActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         init()
+        autoLogin()
     }
 
     private fun init(){
 
         binding.idEt.imeOptions = EditorInfo.IME_ACTION_NEXT
         binding.pwEt.imeOptions = EditorInfo.IME_ACTION_DONE
+
+
+        if (getSharedPreferences("Login",Context.MODE_PRIVATE).getString("autoLogin","") == "check"){
+            binding.autoLoginBt.setBackgroundResource(R.drawable.check_bt_able)
+        }
 
         // 자동 로그인 버튼 변경 이벤트 리스너
         binding.autoLoginBt.setOnCheckedChangeListener { _, isChecked ->
@@ -47,12 +54,12 @@ class LoginActivity : AppCompatActivity() {
             } else {
                 binding.autoLoginBt.setBackgroundResource(R.drawable.check_bt_disable)
                 getSharedPreferences("Login", Context.MODE_PRIVATE).edit {
-                    putString("autoLogin", "check")
+                    putString("autoLogin", "uncheck")
                     apply()
                 }
             }
         }
-
+        //로그인 버튼 클릭 이벤트 리스너
         binding.loginBt.setOnClickListener {
             binding.notiTv.text = ""
             if (binding.idEt.text.isEmpty()){
@@ -80,35 +87,58 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    private fun autoLogin(){
+
+        if (getSharedPreferences("Login",Context.MODE_PRIVATE).getString("userId","") != "" &&
+            getSharedPreferences("Login",Context.MODE_PRIVATE).getString("userPw","") != ""){
+            binding.idEt.setText(getSharedPreferences("Login",Context.MODE_PRIVATE).getString("userId",""))
+            binding.pwEt.setText(getSharedPreferences("Login",Context.MODE_PRIVATE).getString("userPw",""))
+            binding.loginBt.performClick()
+        }
+    }
+
     private fun logInRetrofit2(){
         //서버로 전송 할 데이터 셋
         var retrofitService : RetrofitService = getRetrofitService()
 
         //서버와 데이터를 주고 받을 Call 선언 Call<받는데이터> retrofitService.login(보내는데이터)
         var call: Call<LoginRoot> = retrofitService.login(LoginSend(
-            binding.idEt.text.toString(),
+            binding.idEt.text.toString().replace(" ",""),
             binding.pwEt.text.toString()
         ))
 
         call.enqueue(object : Callback<LoginRoot> {
             override fun onFailure(call: Call<LoginRoot>, t: Throwable) {
-                Log.d("DEBUG : ", t.message.toString())
+                Log.d("gwan2103_login", "fail ====> ${t.message.toString()}")
             }
 
             override fun onResponse(
                 call: Call<LoginRoot>,
                 response: Response<LoginRoot>
             ) {
-                Log.d("DEBUG : ", response.body().toString())
+                Log.d("gwan2103_login", "success ====> ${response.body().toString()}")
 
                 val data = response.body()
 
-                val code = data!!.code
-                val msg = data!!.message
+                val code = data?.code
+                val msg = data?.message
 
-                Log.d("gwan_2103", "code >>>>>>>>>>>> $code")
-                Log.d("gwan_2103", "msg >>>>>>>>>>>> $msg")
+                Log.d("gwan2103_login", "code ====> $code")
+                Log.d("gwan2103_login", "msg ====> $msg")
 
+                if (code == 200) {
+                    getSharedPreferences("Login", Context.MODE_PRIVATE).edit() {
+                        putString("userId",binding.idEt.text.toString().replace(" ",""))
+                        putString("userPw",binding.pwEt.text.toString())
+                        putString("user_key", data.data?.userId)
+                        putString("user_name",data.data?.userName)
+                        apply()
+                    }
+                    startActivity(Intent(this@LoginActivity, HomeActivity::class.java))
+                    finish()
+                } else {
+                    binding.notiTv.text = msg
+                }
             }
         })
     }

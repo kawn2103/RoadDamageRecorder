@@ -8,11 +8,17 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 class RetrofitInstance {
     companion object RetrofitInstanceObject {
 
-        var client = OkHttpClient.Builder().addInterceptor(httpLoggingInterceptor()!!).build()
+        var client = OkHttpClient.Builder()
+                .connectTimeout(1,TimeUnit.MINUTES)
+                .readTimeout(1,TimeUnit.MINUTES)
+                .writeTimeout(1,TimeUnit.MINUTES)
+                .addInterceptor(httpLoggingInterceptor()!!)
+                .build()
 
         private val gson : Gson = GsonBuilder().setLenient().create()
 

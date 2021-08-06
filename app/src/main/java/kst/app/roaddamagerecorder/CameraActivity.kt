@@ -6,7 +6,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.*
+import android.location.Address
+import android.location.Geocoder
 import android.media.ExifInterface
 import android.media.Image
 import android.media.ImageReader
@@ -19,21 +25,26 @@ import android.view.TextureView.SurfaceTextureListener
 import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.Toast
-import androidx.annotation.RequiresApi
-import androidx.annotation.UiThread
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.gms.location.*
 import kst.app.roaddamagerecorder.databinding.ActivityCameraBinding
+import kst.app.roaddamagerecorder.model.weather.Weather
+import kst.app.roaddamagerecorder.retrofit2.RetrofitInstance
+import kst.app.roaddamagerecorder.retrofit2.RetrofitService
+import org.json.JSONObject
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 
-class CameraActivity : AppCompatActivity() {
+class CameraActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var binding: ActivityCameraBinding
 
@@ -45,7 +56,35 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var locationRequest: LocationRequest
     // 위치 정보 콜백
     private lateinit var locationCallback: LocationCallback
+    //초기화 카운트
+    private var recorderTimerCnt = 0
+    //GPS 좌표
+    private var gpsLat: Double = 0.0
+    private var gpsLong: Double = 0.0
+    //메이커
+    private var maker: String = Build.MANUFACTURER
+    //모델
+    private var model: String= Build.MODEL
+    //지역 구 저장
+    private var globalSubLocality = "96"
+    //지역 동 저장
+    private var globalThoroughfare = "75"
+    //하늘 상태 저장
+    private var skyValue = "ND"
+    //강수 형태 저장
+    private var ptyValue = "ND"
+    //핸드폰 센서를 총괄하는 센서메니저
+    private lateinit var sensorManager: SensorManager
+    //핸드폰 기울기를 구하는 센서
+    private lateinit var orientationSensor: Sensor
+    //기울기 Roll 값
+    private var yawValue = 0.0
+    //기울기 Roll 값
+    private var rollValue = 0.0
+    //기울기 Pitch 값
+    private var pitchValue = 0.0
 
+    //카메라 관련 변수
     private var cameraId: String? = null
     private var cameraDevice: CameraDevice? = null
     private var mediaRecorder: MediaRecorder? = null
@@ -106,7 +145,8 @@ class CameraActivity : AppCompatActivity() {
 
     private inner class ImageSaver(image: Image) : Runnable {
         private val mImage: Image = image
-        private val imageFilePath: String = "$basePath/${SimpleDateFormat("yyyy-MM-dd HH_mm_ss_SSS").format(Date())}.jpg"
+        private val fileName = SimpleDateFormat("yyyy-MM-dd HH_mm_ss_SSS").format(Date())
+        private val imageFilePath: String = "$basePath/$fileName.jpg"
 
         override fun run() {
             val byteBuffer = mImage.planes[0].buffer
@@ -129,12 +169,13 @@ class CameraActivity : AppCompatActivity() {
                     }
                 }
             }
-            setExif(imageFilePath)
+            setExif(imageFilePath, fileName)
         }
     }
 
     private val onImageAvailableListener = ImageReader.OnImageAvailableListener {
         backgroundHandler?.post(ImageSaver(it.acquireNextImage()))
+
     }
 
     private var recordCaptureSession: CameraCaptureSession? = null
@@ -207,7 +248,24 @@ class CameraActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         //위치 정보 요청
         getLocationUpdates()
+        initSensor()
         initViews()
+    }
+
+    private fun initSensor(){
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        orientationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    override fun onSensorChanged(event: SensorEvent) {
+        /*Log.d("gwan2103_orientation", "sensorData Yaw ====> ${event.values[0]}")
+        Log.d("gwan2103_orientation", "sensorData Roll ====> ${event.values[1]}")
+        Log.d("gwan2103_orientation", "sensorData Pitch ====> ${event.values[2]}")*/
+        yawValue = event.values[0].toDouble()
+        rollValue = event.values[1].toDouble()
+        pitchValue = event.values[2].toDouble()
     }
 
     private fun initViews(){
@@ -215,7 +273,7 @@ class CameraActivity : AppCompatActivity() {
             var recordBt = it as ImageButton
 
             if (recordBt.tag != null) { //촬영 중지
-                Log.d("gwan2103_recordBt",recordBt.tag.toString())
+                Log.d("gwan2103_recordBt", recordBt.tag.toString())
                 recordBt.setImageResource(R.drawable.record_start_icon)
                 recordBt.tag = null
                 stopRecordRoad()
@@ -241,7 +299,7 @@ class CameraActivity : AppCompatActivity() {
         Log.d("gwan2103_dir", "sdCard Storage able ====> ${isExternalStorageReadable()}")
         val externalStorageVolumes: Array<out File> =
                 ContextCompat.getExternalFilesDirs(applicationContext, null)
-        val primaryExternalStorage = externalStorageVolumes[1]
+        val primaryExternalStorage = externalStorageVolumes.last()
         Log.d("gwan2103_dir", "primaryExternalStorage ====> $primaryExternalStorage")
         val mediaDir = File(primaryExternalStorage, "${SimpleDateFormat("yyyy-MM-dd HH_mm_ss").format(Date())}")
 
@@ -284,8 +342,10 @@ class CameraActivity : AppCompatActivity() {
                     val location = locationResult.lastLocation
                     /*binding.latTv.text = location.latitude.toString()
                     binding.longTv.text = location.longitude.toString()*/
-                    Log.d("gwan2103_gps", "latitude ====> ${location.latitude}")
-                    Log.d("gwan2103_gps", "longitude ====> ${location.longitude}")
+                    /*Log.d("gwan2103_gps", "latitude ====> ${location.latitude}")
+                    Log.d("gwan2103_gps", "longitude ====> ${location.longitude}")*/
+                    gpsLat = location.latitude
+                    gpsLong = location.longitude
                 }
             }
         }
@@ -337,12 +397,32 @@ class CameraActivity : AppCompatActivity() {
         mediaRecorder?.start()
         captureTimerTask = kotlin.concurrent.timer(period = 500){
             runOnUiThread {
-                binding.captureBt.performClick()
+                if (recorderTimerCnt%120 == 0){
+                    getCurrentAddress(gpsLat, gpsLong)
+                }
+                if (recorderTimerCnt == 3600){
+                    reStartRecordRoad()
+                }else{
+                    binding.captureBt.performClick()
+                    recorderTimerCnt++
+
+                }
+                //binding.captureBt.performClick()
             }
         }
     }
 
+    private fun reStartRecordRoad(){
+        binding.recordBt.performClick()
+        Handler().postDelayed({
+            runOnUiThread {
+                binding.recordBt.performClick()
+            }
+        }, 1000)
+    }
+
     private fun stopRecordRoad(){
+        recorderTimerCnt = 0
         captureTimerTask?.cancel()
         startPreview()
         mediaRecorder?.stop()
@@ -360,7 +440,7 @@ class CameraActivity : AppCompatActivity() {
                     continue
                 }
                 val map = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                imageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 1)
+                imageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 50)
                 imageReader?.setOnImageAvailableListener(onImageAvailableListener, backgroundHandler)
                 this.cameraId = cameraId
                 return
@@ -408,7 +488,7 @@ class CameraActivity : AppCompatActivity() {
     //동영상 녹화 미디어 레코더 세팅
     @Throws(IOException::class)
     private fun setupMediaRecorder() {
-        Log.d("gwan2103_flow","setupMediaRecorder basePath ====> $basePath")
+        Log.d("gwan2103_flow", "setupMediaRecorder basePath ====> $basePath")
         mediaRecorder?.setVideoSource(MediaRecorder.VideoSource.SURFACE)
         mediaRecorder?.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
         mediaRecorder?.setOutputFile(File(
@@ -424,7 +504,7 @@ class CameraActivity : AppCompatActivity() {
 
     private fun startPreview(){
         val surfaceTexture = binding.cameraView.surfaceTexture
-        surfaceTexture?.setDefaultBufferSize(1920,1080)
+        surfaceTexture?.setDefaultBufferSize(1920, 1080)
         val previewSurface = Surface(surfaceTexture)
 
         try {
@@ -438,7 +518,7 @@ class CameraActivity : AppCompatActivity() {
                             try {
                                 captureRequestBuilder?.build()?.let {
                                     previewCaptureSession?.setRepeatingRequest(it,
-                                            null,backgroundHandler)
+                                            null, backgroundHandler)
                                 }
                             } catch (e: CameraAccessException) {
                                 e.printStackTrace()
@@ -448,7 +528,7 @@ class CameraActivity : AppCompatActivity() {
                         override fun onConfigureFailed(session: CameraCaptureSession) {
                         }
                     }, null)
-        }catch (e:Exception){
+        }catch (e: Exception){
             e.printStackTrace()
         }
     }
@@ -488,7 +568,7 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
-    private fun mediaNotification(imageFilePath : String){
+    private fun mediaNotification(imageFilePath: String){
         Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).also {
             it.data = Uri.fromFile(File(imageFilePath))
             LocalBroadcastManager.getInstance(this@CameraActivity).sendBroadcast(it)
@@ -499,17 +579,140 @@ class CameraActivity : AppCompatActivity() {
         try {
             captureRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_VIDEO_SNAPSHOT)
             imageReader?.surface?.let { captureRequestBuilder?.addTarget(it) }
-            captureRequestBuilder?.build()?.let { recordCaptureSession?.capture(it,recordCaptureCallback,backgroundHandler) }
-        }catch (e : Exception){
+            captureRequestBuilder?.build()?.let { recordCaptureSession?.capture(it, recordCaptureCallback, backgroundHandler) }
+            Log.d("gwan2103_captureCnt", "capture_Cnt ====> $recorderTimerCnt")
+        }catch (e: Exception){
             e.printStackTrace()
         }
 
     }
+
+    private fun getCurrentAddress(lat: Double, long: Double){
+        val geocoder = Geocoder(this, Locale.getDefault())
+
+        val addresses: List<Address>?
+
+        addresses = try {
+            geocoder.getFromLocation(
+                    lat,
+                    long,
+                    7)
+        } catch (e: Exception){
+            return
+        }
+
+        if (addresses.isNullOrEmpty()) {
+            Toast.makeText(this, "주소 미발견", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val address: Address = addresses[0]
+        Log.d("gwan2103_geocoder", "0000 ====> ${address.subLocality}")
+        Log.d("gwan2103_geocoder", "0001 ====> ${address.thoroughfare}")
+        Log.d("gwan2103_geocoder", "0002 ====> ${address.getAddressLine(0)}")
+        if (!address.thoroughfare.isNullOrEmpty() && !address.thoroughfare.isNullOrEmpty()){
+            Log.d("gwan2103_geocoder", "안빔 시발")
+            when (address.thoroughfare) {
+                "삼락동", "모라1동", "모라3동", "덕포2동" -> {
+                    globalSubLocality = "96"
+                    globalThoroughfare = "76"
+                    Log.d("gwan2103_geocoder", "삼락동 ====> $globalSubLocality /// $globalThoroughfare")
+                }
+                "덕포1동", "괘법동", "감전동", "학장동", "엄궁동" -> {
+                    globalSubLocality = "96"
+                    globalThoroughfare = "75"
+                    Log.d("gwan2103_geocoder", "덕포1동 ====> $globalSubLocality /// $globalThoroughfare")
+                }
+                "주례1동", "주례2동", "주례3동" -> {
+                    globalSubLocality = "97"
+                    globalThoroughfare = "75"
+                    Log.d("gwan2103_geocoder", "주례3동 ====> $globalSubLocality /// $globalThoroughfare")
+                }
+                "우동" -> {
+                    globalSubLocality = "99"
+                    globalThoroughfare = "75"
+                    Log.d("gwan2103_geocoder", "우동 ====> $globalSubLocality /// $globalThoroughfare")
+                }
+                else -> {
+                    globalSubLocality = "96"
+                    globalThoroughfare = "75"
+                    Log.d("gwan2103_geocoder", "없음 ====> $globalSubLocality /// $globalThoroughfare")
+                }
+            }
+        }else{
+            globalSubLocality = "96"
+            globalThoroughfare = "75"
+            Log.d("gwan2103_geocoder", "빔 시발 ====> $globalSubLocality /// $globalThoroughfare")
+        }
+
+        Log.d("gwan2103_geocoder", "0003 ====> $globalSubLocality")
+        Log.d("gwan2103_geocoder", "0004 ====> $globalThoroughfare")
+        weatherRetrofit2()
+    }
+
+    private fun weatherRetrofit2(){
+        val baseDate = SimpleDateFormat("yyyyMMdd").format(Date())
+        val baseTime = Integer.parseInt(SimpleDateFormat("HH").format(Date())) - 1
+        val baseTimeString = String.format("%02d", baseTime)
+
+        var retrofitService : RetrofitService = RetrofitInstance.getRetrofitService()
+        var call: Call<Weather> = retrofitService.getWeather(
+                "JSON",
+                100,
+                1,
+                baseDate,
+                "${baseTimeString}00",
+                globalSubLocality,
+                globalThoroughfare
+        )
+
+        call.enqueue(object : Callback<Weather> {
+            override fun onResponse(call: Call<Weather>, response: Response<Weather>) {
+                if (response.isSuccessful) {
+                    for (num in response.body()!!.response.body.items.item.indices step 6) {
+                        if (response.body()!!.response.body.items.item[num].category == "SKY") {
+                            skyValue = response.body()!!.response.body.items.item[num].fcstValue
+                            Log.d("gwan2103_weather", "skyValue ====> $skyValue")
+                        } else if (response.body()!!.response.body.items.item[num].category == "PTY") {
+                            ptyValue = response.body()!!.response.body.items.item[num].fcstValue
+                            Log.d("gwan2103_weather", "ptyValue ====> $ptyValue")
+                        }
+                    }
+                }
+            }
+
+            override fun onFailure(call: Call<Weather>, t: Throwable) {
+                t.message?.let { Log.d("api fail : ", it) }
+                skyValue = "NE"
+                ptyValue = "NE"
+            }
+        })
+    }
+
+    private fun makeJson(): String{
+        val jsonObj = JSONObject()
+        jsonObj.put("sky",skyValue)
+        jsonObj.put("pty",ptyValue)
+        jsonObj.put("roll",rollValue)
+        jsonObj.put("pitch",pitchValue)
+        jsonObj.put("yaw",yawValue)
+        jsonObj.put("globalSubLocality",globalSubLocality)
+        jsonObj.put("globalThoroughfare",globalThoroughfare)
+
+        return jsonObj.toString()
+    }
+
     //촬영 사진 메타데이터 삽입
-    private fun setExif(path: String){
+    private fun setExif(path: String, date: String){
         try {
             val exif = ExifInterface(path)
-            exif.setAttribute(ExifInterface.TAG_APERTURE_VALUE, "1")
+            exif.setAttribute(ExifInterface.TAG_DATETIME, date)
+            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, "$gpsLat")
+            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, "$gpsLong")
+            exif.setAttribute(ExifInterface.TAG_MAKE, maker)
+            exif.setAttribute(ExifInterface.TAG_MODEL, model)
+            exif.setAttribute(ExifInterface.TAG_USER_COMMENT, makeJson())
+            /*exif.setAttribute(ExifInterface.TAG_APERTURE_VALUE, "1")
             exif.setAttribute(ExifInterface.TAG_ARTIST, "2")
             exif.setAttribute(ExifInterface.TAG_BITS_PER_SAMPLE, "3")
             exif.setAttribute(ExifInterface.TAG_BRIGHTNESS_VALUE, "5")
@@ -521,7 +724,6 @@ class CameraActivity : AppCompatActivity() {
             exif.setAttribute(ExifInterface.TAG_CONTRAST, "12")
             exif.setAttribute(ExifInterface.TAG_COPYRIGHT, "13")
             exif.setAttribute(ExifInterface.TAG_CUSTOM_RENDERED, "14")
-            exif.setAttribute(ExifInterface.TAG_DATETIME, "15")
             exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, "16")
             exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "17")
             exif.setAttribute(ExifInterface.TAG_DEFAULT_CROP_SIZE, "18")
@@ -562,9 +764,7 @@ class CameraActivity : AppCompatActivity() {
             exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, "56")
             exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, "57")
             exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, "58")
-            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, "59")
             exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, "60")
-            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, "61")
             exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, "62")
             exif.setAttribute(ExifInterface.TAG_GPS_MEASURE_MODE, "63")
             exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, "64")
@@ -577,18 +777,16 @@ class CameraActivity : AppCompatActivity() {
             exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, "71")
             exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, "72")
             exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, "73")
-            exif.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, "74")
+            exif.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, "1080")
             exif.setAttribute(ExifInterface.TAG_IMAGE_UNIQUE_ID, "75")
-            exif.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, "76")
+            exif.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, "1920")
             exif.setAttribute(ExifInterface.TAG_INTEROPERABILITY_INDEX, "77")
             exif.setAttribute(ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT, "81")
-            exif.setAttribute(ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT_LENGTH, "82")
+            exif.setAttribute(ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT_LENGTH, "????")
             exif.setAttribute(ExifInterface.TAG_LIGHT_SOURCE, "87")
-            exif.setAttribute(ExifInterface.TAG_MAKE, "88")
             exif.setAttribute(ExifInterface.TAG_MAKER_NOTE, "89")
             exif.setAttribute(ExifInterface.TAG_MAX_APERTURE_VALUE, "90")
             exif.setAttribute(ExifInterface.TAG_METERING_MODE, "91")
-            exif.setAttribute(ExifInterface.TAG_MODEL, "82")
             exif.setAttribute(ExifInterface.TAG_NEW_SUBFILE_TYPE, "83")
             exif.setAttribute(ExifInterface.TAG_OECF, "84")
             exif.setAttribute(ExifInterface.TAG_ORF_ASPECT_FRAME, "85")
@@ -634,14 +832,13 @@ class CameraActivity : AppCompatActivity() {
             exif.setAttribute(ExifInterface.TAG_THUMBNAIL_IMAGE_LENGTH, "129")
             exif.setAttribute(ExifInterface.TAG_THUMBNAIL_IMAGE_WIDTH, "130")
             exif.setAttribute(ExifInterface.TAG_TRANSFER_FUNCTION, "131")
-            exif.setAttribute(ExifInterface.TAG_USER_COMMENT, "132")
             exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, "133")
             exif.setAttribute(ExifInterface.TAG_WHITE_POINT, "134")
             exif.setAttribute(ExifInterface.TAG_X_RESOLUTION, "135")
             exif.setAttribute(ExifInterface.TAG_Y_CB_CR_COEFFICIENTS, "136")
             exif.setAttribute(ExifInterface.TAG_Y_CB_CR_POSITIONING, "137")
             exif.setAttribute(ExifInterface.TAG_Y_CB_CR_SUB_SAMPLING, "138")
-            exif.setAttribute(ExifInterface.TAG_Y_RESOLUTION, "139")
+            exif.setAttribute(ExifInterface.TAG_Y_RESOLUTION, "139")*/
             exif.saveAttributes()
         } catch (e: IOException) {
             // handle the error
@@ -657,6 +854,7 @@ class CameraActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         startLocationUpdates()  //위치 정보 업데이트 시작
+        sensorManager.registerListener(this, orientationSensor, SensorManager.SENSOR_DELAY_NORMAL) //센서 정보 업데이트
         startBackgroundThread()
         if (binding.cameraView.isAvailable) {
             setupCamera()
@@ -668,7 +866,8 @@ class CameraActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        stopLocationUpdates()   //위치 정보 업데이트 종료\
+        stopLocationUpdates()   //위치 정보 업데이트 종료
+        sensorManager.unregisterListener(this)    //센서 정보 업데이트
         if (binding.recordBt.tag != null){
             mediaRecorder?.stop()
         }
